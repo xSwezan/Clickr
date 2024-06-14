@@ -1,0 +1,23 @@
+[package]
+name = "clickr"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+autopilot = "0.4.0"
+crossterm = "0.27.0"
+eframe = "0.27.2"
+egui_extras = { version = "0.27.2", features = ["image"] }
+
+image = "0.25.1"
+inputbot = "0.6.0"
+mouse-rs = "0.4.2"
+rand = "0.8.5"
+strum = "0.26.2"
+strum_macros = "0.26.4"
+# winapi = { version = "0.3", features = ["winuser"] }
+# tokio = { version = "1.38.0", features = ["full"] }
+
+[[bin]]
+name = "clickr"
+path = "src/main.rs"
