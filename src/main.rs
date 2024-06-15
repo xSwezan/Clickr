@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use eframe::egui::{self, Color32, IconData, Rect, RichText, Rounding, Sense};
+use eframe::egui::{self, Align2, Color32, IconData, Rect, RichText, Rounding, Sense};
 use image::GenericImageView;
 use inputbot::KeybdKey;
 use mouse_rs::Mouse;
@@ -704,6 +704,14 @@ impl eframe::App for AppHolder {
                         ui.label(format!("Pressed: {}", app.mouse_is_pressed));
                     }
                 }
+
+                ui.painter().text(
+                    ui.available_rect_before_wrap().right_bottom(),
+                    Align2::RIGHT_BOTTOM,
+                    env!("CARGO_PKG_VERSION"),
+                    egui::FontId::proportional(10.0),
+                    ui.style().visuals.text_color(),
+                );
             });
         });
 
