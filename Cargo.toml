@@ -5,19 +5,26 @@ edition = "2021"
 
 [dependencies]
 autopilot = "0.4.0"
-crossterm = "0.27.0"
 eframe = "0.27.2"
 egui_extras = { version = "0.27.2", features = ["image"] }
 
-image = "0.25.1"
+image = { version = "0.25.1", features = ["png"] }
 inputbot = "0.6.0"
 mouse-rs = "0.4.2"
 rand = "0.8.5"
 strum = "0.26.2"
 strum_macros = "0.26.4"
-# winapi = { version = "0.3", features = ["winuser"] }
-# tokio = { version = "1.38.0", features = ["full"] }
+
+[build-dependencies]
+winres = "0.1.12"
+
+[profile.release]
+# strip = true
+panic = "abort"
+lto = true
+opt-level = "s"
+codegen-units = 1
 
 [[bin]]
-name = "clickr"
+name = "Clickr"
 path = "src/main.rs"

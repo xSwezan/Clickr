@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::{
     sync::{Arc, Mutex, MutexGuard},
     thread::{self, sleep},
@@ -51,7 +53,11 @@ fn percentage_distance_between_colors(a: Color32, b: Color32) -> f32 {
 
 fn main() -> Result<(), eframe::Error> {
     let (icon_rgba, icon_width, icon_height) = {
-        let image = image::open("src/assets/Click.png").unwrap();
+        let image = image::load_from_memory_with_format(
+            include_bytes!("./assets/Click.png"),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
         let (width, height) = image.dimensions();
         let rgba = image.into_rgba8().into_vec();
         (rgba, width, height)
@@ -106,10 +112,6 @@ impl AppHolder {
                 break;
             }
 
-            // if app.limit_clicks && app.total_clicks >= app.limit_clicks_amount {
-            //     app.clicker_enabled = false;
-            //     break;
-            // }
             match app.limit_mode {
                 LimitMode::Clicks => {
                     if app.total_clicks >= app.limit_mode_clicks_amount {
@@ -129,11 +131,13 @@ impl AppHolder {
                 }
                 _ => {}
             }
-            let percentage =
-                percentage_distance_between_colors(app.hovering_pixel_color, app.color_mode_color);
 
             let should_click: bool = !app.color_mode
-                || (app.color_mode && percentage <= app.color_mode_distance_threshold);
+                || (app.color_mode
+                    && percentage_distance_between_colors(
+                        app.hovering_pixel_color,
+                        app.color_mode_color,
+                    ) <= app.color_mode_distance_threshold);
 
             if should_click {
                 app.mouse_is_pressed = !app.mouse_is_pressed;
@@ -405,6 +409,7 @@ impl eframe::App for AppHolder {
                                         columns[i].push_id(i, |ui| {
                                             ui.add(
                                                 egui::DragValue::new(value)
+                                                    .suffix("s")
                                                     .speed(0.1)
                                                     .min_decimals(1)
                                                     .clamp_range(0..=3600)
@@ -430,10 +435,13 @@ impl eframe::App for AppHolder {
                             });
                         });
 
-                        let total_seconds: f64 = app.hours as f64 * 3600.0
-                            + app.minutes as f64 * 60.0
-                            + app.seconds as f64
-                            + app.milliseconds as f64 / 1000.0;
+                        let total_seconds: f64 = match app.interval_mode {
+                            IntervalMode::Constant => app.hours as f64 * 3600.0
+                                + app.minutes as f64 * 60.0
+                                + app.seconds as f64
+                                + app.milliseconds as f64 / 1000.0,
+                            IntervalMode::Random => app.interval_mode_random_min as f64,
+                        };
                         let cps: u32 = (1.0 / total_seconds) as u32;
 
                         // if total_seconds == 0.0 {
@@ -451,7 +459,7 @@ impl eframe::App for AppHolder {
                                 );
                                 ui.colored_label(
                                     warning_color,
-                                    RichText::new("Your system may crash!").monospace(),
+                                    RichText::new("Your system may lag much!").monospace(),
                                 );
                             });
                         } else if cps >= 200 {
@@ -580,6 +588,7 @@ impl eframe::App for AppHolder {
                             ui.label("Color Mode").on_hover_text("If enabled, the auto clicker will only click if the cursor's current\nhovering pixel has the same color as the set Color property.");
                             ui.checkbox(&mut app.color_mode, "");
                             ui.colored_label(Color32::from_rgb(255, 170, 0), "(EXPERIMENTAL)");
+                            ui.colored_label(Color32::from_rgb(200, 0, 0), "(VERY SLOW)").on_hover_text("Color Mode is very slow and will cause your auto clicker to click slower.\nIt is intended to be used in situations where the delay doesn't really\nmatter.");
                         });
                         ui.indent("colormode", |ui| {
                             ui.add_enabled_ui(app.color_mode, |ui| {
