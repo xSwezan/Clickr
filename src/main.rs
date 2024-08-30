@@ -6,7 +6,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use eframe::egui::{self, Align2, Color32, IconData, Rect, RichText, Rounding, Sense};
+use eframe::{
+    egui::{
+        self, Align2, Color32, FontDefinitions, FontFamily, IconData, Margin, Rect, RichText,
+        Rounding, Sense,
+    },
+    CreationContext,
+};
+use egui_extras::{Column, TableBuilder};
 use image::GenericImageView;
 use inputbot::KeybdKey;
 use mouse_rs::Mouse;
@@ -23,7 +30,8 @@ enum MouseButton {
 
 #[derive(AsRefStr, Eq, PartialEq, EnumIter, Clone, Copy, Debug)]
 enum ClickMode {
-    Click,
+    Single,
+    Double,
     Toggle,
 }
 
@@ -51,6 +59,23 @@ fn percentage_distance_between_colors(a: Color32, b: Color32) -> f32 {
     percentage
 }
 
+fn tag_label(ui: &mut egui::Ui, text: &str, color: Color32) {
+    egui::Frame::default()
+        .fill(color)
+        .inner_margin(Margin::symmetric(5.0, 0.0))
+        .outer_margin(Margin::ZERO)
+        .rounding(Rounding::same(3.0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(text)
+                        .color(egui::Color32::WHITE)
+                        .size(10.0),
+                );
+            });
+        });
+}
+
 fn main() -> Result<(), eframe::Error> {
     let (icon_rgba, icon_width, icon_height) = {
         let image = image::load_from_memory_with_format(
@@ -67,7 +92,7 @@ fn main() -> Result<(), eframe::Error> {
         "Clickr",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_inner_size([400.0, 400.0])
+                .with_inner_size([400.0, 410.0])
                 .with_always_on_top()
                 .with_maximize_button(false)
                 .with_active(true)
@@ -81,7 +106,7 @@ fn main() -> Result<(), eframe::Error> {
         },
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Box::new(AppHolder::default())
+            Ok(Box::new(AppHolder::new(cc)))
         }),
     )
 }
@@ -91,6 +116,90 @@ struct AppHolder {
 }
 
 impl AppHolder {
+    fn new(cc: &CreationContext<'_>) -> Self {
+        let new_app = App {
+            mouse: Mouse::new(),
+
+            interval_mode: IntervalMode::Constant,
+            hours: 0,
+            minutes: 0,
+            seconds: 0,
+            milliseconds: 100,
+
+            interval_mode_random_min: 1.0,
+            interval_mode_random_max: 2.0,
+
+            mouse_button: MouseButton::Left,
+            click_mode: ClickMode::Single,
+
+            mouse_is_pressed: false,
+
+            clicker_id: 0,
+
+            color_mode: false,
+            color_mode_color: Color32::BLACK,
+            hovering_pixel_color: Color32::BLACK,
+
+            limit_mode: LimitMode::None,
+            limit_mode_clicks_amount: 10,
+            color_mode_distance_threshold: 0,
+            limit_mode_time: 1.0,
+
+            clicker_enabled: false,
+            last_clicker_enabled: false,
+            clicker_start_time: Instant::now(),
+            total_clicks: 0,
+
+            always_on_top: true,
+        };
+
+        let app_arc = Arc::new(Mutex::new(new_app));
+        let app_arc_clone = app_arc.clone();
+
+        KeybdKey::F6Key.bind(move || {
+            let mut app = app_arc_clone.lock().unwrap();
+            app.clicker_enabled = !app.clicker_enabled;
+        });
+
+        thread::spawn(|| inputbot::handle_input_events());
+
+        let mut fonts = FontDefinitions::default();
+
+        // Inter Bold
+        fonts.font_data.insert(
+            "InterBold".to_owned(),
+            egui::FontData::from_static(include_bytes!("./assets/fonts/InterBold.ttf")),
+        );
+        fonts.families.insert(
+            FontFamily::Name("InterBold".into()),
+            vec!["InterBold".to_owned()],
+        );
+        fonts
+            .families
+            .get_mut(&FontFamily::Proportional)
+            .unwrap()
+            .insert(0, "InterBold".to_owned());
+
+        // Inter Regular
+        fonts.font_data.insert(
+            "InterRegular".to_owned(),
+            egui::FontData::from_static(include_bytes!("./assets/fonts/InterRegular.ttf")),
+        );
+        fonts.families.insert(
+            FontFamily::Name("InterRegular".into()),
+            vec!["InterRegular".to_owned()],
+        );
+        fonts
+            .families
+            .get_mut(&FontFamily::Proportional)
+            .unwrap()
+            .insert(0, "InterRegular".to_owned());
+
+        cc.egui_ctx.set_fonts(fonts);
+
+        AppHolder { main_app: app_arc }
+    }
+
     fn app(&self) -> MutexGuard<App> {
         self.main_app.lock().unwrap()
     }
@@ -137,7 +246,7 @@ impl AppHolder {
                     && percentage_distance_between_colors(
                         app.hovering_pixel_color,
                         app.color_mode_color,
-                    ) <= app.color_mode_distance_threshold);
+                    ) <= app.color_mode_distance_threshold as f32 / 255.0);
 
             if should_click {
                 app.mouse_is_pressed = !app.mouse_is_pressed;
@@ -204,7 +313,7 @@ struct App {
 
     color_mode: bool,
     color_mode_color: Color32,
-    color_mode_distance_threshold: f32,
+    color_mode_distance_threshold: u8,
     hovering_pixel_color: Color32,
 
     limit_mode: LimitMode,
@@ -215,56 +324,8 @@ struct App {
     last_clicker_enabled: bool,
     clicker_start_time: Instant,
     total_clicks: u32,
-}
 
-impl Default for AppHolder {
-    fn default() -> Self {
-        let new_app = App {
-            mouse: Mouse::new(),
-
-            interval_mode: IntervalMode::Constant,
-            hours: 0,
-            minutes: 0,
-            seconds: 0,
-            milliseconds: 100,
-
-            interval_mode_random_min: 1.0,
-            interval_mode_random_max: 2.0,
-
-            mouse_button: MouseButton::Left,
-            click_mode: ClickMode::Click,
-
-            mouse_is_pressed: false,
-
-            clicker_id: 0,
-
-            color_mode: false,
-            color_mode_color: Color32::BLACK,
-            hovering_pixel_color: Color32::BLACK,
-
-            limit_mode: LimitMode::None,
-            limit_mode_clicks_amount: 10,
-            color_mode_distance_threshold: 0.0,
-            limit_mode_time: 1.0,
-
-            clicker_enabled: false,
-            last_clicker_enabled: false,
-            clicker_start_time: Instant::now(),
-            total_clicks: 0,
-        };
-
-        let app_arc = Arc::new(Mutex::new(new_app));
-        let app_arc_clone = app_arc.clone();
-
-        KeybdKey::F6Key.bind(move || {
-            let mut app = app_arc_clone.lock().unwrap();
-            app.clicker_enabled = !app.clicker_enabled;
-        });
-
-        thread::spawn(|| inputbot::handle_input_events());
-
-        AppHolder { main_app: app_arc }
-    }
+    always_on_top: bool,
 }
 
 impl App {
@@ -285,7 +346,11 @@ impl App {
                         .expect("Unable to release button");
                 }
             }
-            _ => self.mouse.click(&button).expect("Unable to click button"),
+            ClickMode::Single => self.mouse.click(&button).expect("Unable to click button"),
+            ClickMode::Double => {
+                self.mouse.click(&button).expect("Unable to click button");
+                self.mouse.click(&button).expect("Unable to click button");
+            }
         }
     }
     fn try_release_mouse(&mut self) {
@@ -412,7 +477,7 @@ impl eframe::App for AppHolder {
                                                     .suffix("s")
                                                     .speed(0.1)
                                                     .min_decimals(1)
-                                                    .clamp_range(0..=3600)
+                                                    .range(0..=3600)
                                                     .update_while_editing(false)
                                                     .max_decimals(3),
                                             );
@@ -436,10 +501,12 @@ impl eframe::App for AppHolder {
                         });
 
                         let total_seconds: f64 = match app.interval_mode {
-                            IntervalMode::Constant => app.hours as f64 * 3600.0
-                                + app.minutes as f64 * 60.0
-                                + app.seconds as f64
-                                + app.milliseconds as f64 / 1000.0,
+                            IntervalMode::Constant => {
+                                app.hours as f64 * 3600.0
+                                    + app.minutes as f64 * 60.0
+                                    + app.seconds as f64
+                                    + app.milliseconds as f64 / 1000.0
+                            }
                             IntervalMode::Random => app.interval_mode_random_min as f64,
                         };
                         let cps: u32 = (1.0 / total_seconds) as u32;
@@ -477,7 +544,7 @@ impl eframe::App for AppHolder {
                         }
                     });
 
-                    ui.add_space(20.0);
+                    ui.add_space(15.0);
 
                     egui::Frame::popup(&ctx.style()).show(ui, |ui| {
                         egui::Frame::popup(&ctx.style())
@@ -504,130 +571,245 @@ impl eframe::App for AppHolder {
                             });
                         ui.add_space(10.0);
 
-                        if ui
-                            .add_sized(
-                                [50.0, 50.0],
-                                egui::ImageButton::new(match app.mouse_button {
-                                    MouseButton::Left => {
-                                        egui::include_image!("./assets/MouseLeft.png")
-                                    }
-                                    MouseButton::Middle => {
-                                        egui::include_image!("./assets/MouseMiddle.png")
-                                    }
-                                    MouseButton::Right => {
-                                        egui::include_image!("./assets/MouseRight.png")
-                                    }
-                                })
-                                .frame(false),
-                            )
-                            .on_hover_and_drag_cursor(egui::CursorIcon::PointingHand)
-                            .clicked()
-                        {
-                            app.mouse_button = match app.mouse_button {
-                                MouseButton::Left => MouseButton::Middle,
-                                MouseButton::Middle => MouseButton::Right,
-                                MouseButton::Right => MouseButton::Left,
-                            }
-                        };
+                        // ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                        //     if ui
+                        //         .add_sized(
+                        //             [50.0, 50.0],
+                        //             egui::ImageButton::new(match app.mouse_button {
+                        //                 MouseButton::Left => {
+                        //                     egui::include_image!("./assets/MouseLeft.png")
+                        //                 }
+                        //                 MouseButton::Middle => {
+                        //                     egui::include_image!("./assets/MouseMiddle.png")
+                        //                 }
+                        //                 MouseButton::Right => {
+                        //                     egui::include_image!("./assets/MouseRight.png")
+                        //                 }
+                        //             })
+                        //             .frame(false),
+                        //         )
+                        //         .on_hover_and_drag_cursor(egui::CursorIcon::PointingHand)
+                        //         .clicked()
+                        //     {
+                        //         app.mouse_button = match app.mouse_button {
+                        //             MouseButton::Left => MouseButton::Middle,
+                        //             MouseButton::Middle => MouseButton::Right,
+                        //             MouseButton::Right => MouseButton::Left,
+                        //         }
+                        //     };
+                        // });
 
-                        ui.horizontal(|ui| {
-                            ui.label("Click Mode");
-                            egui::ComboBox::from_id_source("clickmode")
-                                .selected_text(format!("{}", app.click_mode.as_ref()))
-                                .show_ui(ui, |ui| {
-                                    for click_mode in ClickMode::iter() {
-                                        ui.selectable_value(
-                                            &mut app.click_mode,
-                                            click_mode,
-                                            click_mode.as_ref(),
-                                        );
-                                    }
-                                });
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.label("Limit Mode");
-                            egui::ComboBox::from_id_source("limitmode")
-                                .selected_text(format!("{}", app.limit_mode.as_ref()))
-                                .show_ui(ui, |ui| {
-                                    for limit_mode in LimitMode::iter() {
-                                        ui.selectable_value(
-                                            &mut app.limit_mode,
-                                            limit_mode,
-                                            limit_mode.as_ref(),
-                                        );
-                                    }
-                                });
-
-                            match app.limit_mode {
-                                LimitMode::Clicks => {
-                                    ui.horizontal(|ui| {
-                                        ui.add(
-                                            egui::DragValue::new(&mut app.limit_mode_clicks_amount)
-                                                .speed(1)
-                                                .max_decimals(0),
-                                        );
-                                        ui.label("Clicks");
+						const ROW_HEIGHT: f32 = 20.0;
+                        TableBuilder::new(ui)
+                            .column(Column::auto().resizable(false))
+                            .column(Column::remainder())
+							.striped(true)
+							.resizable(false)
+                            .body(|mut body| {
+                                body.row(ROW_HEIGHT, |mut row| {
+                                    row.col(|ui| {
+                                        ui.label(
+											RichText::new("Mouse Button")
+												.family(egui::FontFamily::Name("InterBold".into()))
+										);
                                     });
-                                }
-                                LimitMode::Time => {
-                                    ui.horizontal(|ui| {
-                                        ui.add(
-                                            egui::DragValue::new(&mut app.limit_mode_time)
-                                                .speed(0.25)
-                                                .max_decimals(3),
-                                        );
-                                        ui.label("Seconds");
+                                    row.col(|ui| {
+										// ui.with_layout(Layout::left_to_right(egui::Align::Min).with_cross_align(egui::Align::Center), |ui| {
+										// 	if ui
+										// 		.add_sized(
+										// 			[40.0, 40.0],
+										// 			egui::ImageButton::new(match app.mouse_button {
+										// 				MouseButton::Left => {
+										// 					egui::include_image!("./assets/MouseLeft.png")
+										// 				}
+										// 				MouseButton::Middle => {
+										// 					egui::include_image!("./assets/MouseMiddle.png")
+										// 				}
+										// 				MouseButton::Right => {
+										// 					egui::include_image!("./assets/MouseRight.png")
+										// 				}
+										// 			})
+										// 			.frame(false),
+										// 		)
+										// 		.on_hover_and_drag_cursor(egui::CursorIcon::PointingHand)
+										// 		.clicked()
+										// 	{
+										// 		app.mouse_button = match app.mouse_button {
+										// 			MouseButton::Left => MouseButton::Middle,
+										// 			MouseButton::Middle => MouseButton::Right,
+										// 			MouseButton::Right => MouseButton::Left,
+										// 		}
+										// 	};
+										// });
+
+										egui::ComboBox::from_id_source("mousebutton")
+                                            .selected_text(format!("{}", app.mouse_button.as_ref()))
+                                            .show_ui(ui, |ui| {
+                                                for mouse_button in MouseButton::iter() {
+                                                    ui.selectable_value(
+                                                        &mut app.mouse_button,
+                                                        mouse_button,
+                                                        mouse_button.as_ref(),
+                                                    );
+                                                }
+                                            });
+
+										// ui.horizontal(|ui| {
+										// 	ui.selectable_value(&mut app.mouse_button, MouseButton::Left, "Left");
+										// 	ui.selectable_value(&mut app.mouse_button, MouseButton::Middle, "Middle");
+										// 	ui.selectable_value(&mut app.mouse_button, MouseButton::Right, "Right");
+										// });
                                     });
-                                }
-                                _ => {}
-                            }
-                        });
-
-                        ui.horizontal(|ui| {
-                            ui.label("Color Mode").on_hover_text("If enabled, the auto clicker will only click if the cursor's current\nhovering pixel has the same color as the set Color property.");
-                            ui.checkbox(&mut app.color_mode, "");
-                            ui.colored_label(Color32::from_rgb(255, 170, 0), "(EXPERIMENTAL)");
-                            ui.colored_label(Color32::from_rgb(200, 0, 0), "(VERY SLOW)").on_hover_text("Color Mode is very slow and will cause your auto clicker to click slower.\nIt is intended to be used in situations where the delay doesn't really\nmatter.");
-                        });
-                        ui.indent("colormode", |ui| {
-                            ui.add_enabled_ui(app.color_mode, |ui| {
-                                if app.color_mode {
-                                    let mouse_location = autopilot::mouse::location();
-                                    let result = autopilot::screen::get_color(mouse_location);
-                                    if result.is_ok() {
-                                        let pixel = result.unwrap();
-                                        app.hovering_pixel_color =
-                                            Color32::from_rgb(pixel.0[0], pixel.0[1], pixel.0[2]);
-                                    }
-                                }
-
-                                ui.horizontal(|ui| {
-                                    ui.color_edit_button_srgba(&mut app.color_mode_color);
-                                    ui.label("Color").on_hover_text("The color of pixel that you need the cursor to hover over for the\nauto clicker to click.");
                                 });
-                                ui.horizontal(|ui| {
-                                    ui.add(egui::Slider::new(
-                                        &mut app.color_mode_distance_threshold,
-                                        0f32..=1f32,
-                                    ));
-                                    ui.label("Distance Threshold").on_hover_text("This setting lets you set a threshold distance for the Color property.\n\n0.0 = Color has to be the exact same\n1.0 = Color can be any color (any distance is accepted)");
+                                body.row(ROW_HEIGHT, |mut row| {
+                                    row.col(|ui| {
+                                        ui.label(
+											RichText::new("Click Mode")
+												.family(egui::FontFamily::Name("InterBold".into()))
+										);
+                                    });
+                                    row.col(|ui| {
+                                        egui::ComboBox::from_id_source("clickmode")
+                                            .selected_text(format!("{}", app.click_mode.as_ref()))
+                                            .show_ui(ui, |ui| {
+                                                for click_mode in ClickMode::iter() {
+                                                    ui.selectable_value(
+                                                        &mut app.click_mode,
+                                                        click_mode,
+                                                        click_mode.as_ref(),
+                                                    );
+                                                }
+                                            });
+                                    });
                                 });
-                                // ui.horizontal(|ui| {
-                                //     ui.color_edit_button_srgba(
-                                //         &mut app.hovering_pixel_color.clone(),
-                                //     );
-                                //     ui.label("Hovering Color");
-                                // });
-                                // let percentage = percentage_distance_between_colors(
-                                //     app.hovering_pixel_color,
-                                //     app.color_mode_color,
-                                // );
-                                // if percentage <= app.color_mode_distance_threshold {
-                                //     ui.label("YES");
-                                // }
+                                body.row(ROW_HEIGHT, |mut row| {
+                                    row.col(|ui| {
+                                        ui.label(
+											RichText::new("Limit Mode")
+												.family(egui::FontFamily::Name("InterBold".into()))
+										);
+                                    });
+                                    row.col(|ui| {
+										ui.horizontal(|ui| {
+											egui::ComboBox::from_id_source("limitmode")
+												.selected_text(format!("{}", app.limit_mode.as_ref()))
+												.show_ui(ui, |ui| {
+													for limit_mode in LimitMode::iter() {
+														ui.selectable_value(
+															&mut app.limit_mode,
+															limit_mode,
+															limit_mode.as_ref(),
+														);
+													}
+												});
+
+											match app.limit_mode {
+												LimitMode::Clicks => {
+													ui.horizontal(|ui| {
+														ui.add(
+															egui::DragValue::new(
+																&mut app.limit_mode_clicks_amount,
+															)
+															.speed(1)
+															.max_decimals(0),
+														);
+														ui.label("Clicks");
+													});
+												}
+												LimitMode::Time => {
+													ui.horizontal(|ui| {
+														ui.add(
+															egui::DragValue::new(
+																&mut app.limit_mode_time,
+															)
+															.speed(0.25)
+															.max_decimals(3),
+														);
+														ui.label("Seconds");
+													});
+												}
+												_ => {}
+											}
+										});
+                                    });
+                                });
+                                body.row(ROW_HEIGHT, |mut row| {
+                                    row.col(|ui| {
+										ui.horizontal(|ui| {
+											ui.label(
+												RichText::new("Color Mode")
+													.family(egui::FontFamily::Name("InterBold".into()))
+											).on_hover_text("If enabled, the auto clicker will only click if the cursor's current\nhovering pixel has the same color as the set Color property.");
+											tag_label(ui, "BETA", Color32::from_rgb(0, 170, 255));
+										});
+                                    });
+                                    row.col(|ui| {
+										ui.horizontal(|ui| {
+											ui.checkbox(&mut app.color_mode, "");
+											ui.add_space(-10.0);
+											if app.color_mode {
+												egui::CollapsingHeader::new("Settings").show_unindented(ui, |ui| {
+													if app.color_mode {
+														let mouse_location = autopilot::mouse::location();
+														let result = autopilot::screen::get_color(mouse_location);
+														if result.is_ok() {
+															let pixel = result.unwrap();
+															app.hovering_pixel_color =
+																Color32::from_rgb(pixel.0[0], pixel.0[1], pixel.0[2]);
+														}
+													}
+
+													ui.horizontal(|ui| {
+														ui.color_edit_button_srgba(&mut app.color_mode_color);
+														ui.label("Color").on_hover_text("The color of pixel that you need the cursor to hover over for the\nauto clicker to click.");
+													});
+													ui.horizontal(|ui| {
+														// ui.add(egui::Slider::new(
+														// 	&mut app.color_mode_distance_threshold,
+														// 	0f32..=1f32,
+														// ));
+														ui.add(egui::DragValue::new(&mut app.color_mode_distance_threshold).range(0u8..=255u8));
+														ui.label("Threshold").on_hover_text("This setting lets you set a threshold distance for the Color property.\n\n0.0 = Color has to be the exact same\n1.0 = Color can be any color (any distance is accepted)");
+													});
+													// ui.horizontal(|ui| {
+													//     ui.color_edit_button_srgba(
+													//         &mut app.hovering_pixel_color.clone(),
+													//     );
+													//     ui.label("Hovering Color");
+													// });
+													// let percentage = percentage_distance_between_colors(
+													//     app.hovering_pixel_color,
+													//     app.color_mode_color,
+													// );
+													// if percentage <= app.color_mode_distance_threshold {
+													//     ui.label("YES");
+													// }
+												});
+											}
+										});
+                                    });
+                                });
+                                body.row(ROW_HEIGHT, |mut row| {
+                                    row.col(|ui| {
+										ui.horizontal(|ui| {
+											ui.label(
+												RichText::new("Always On Top")
+													.family(egui::FontFamily::Name("InterBold".into()))
+											);
+											tag_label(ui, "BETA", Color32::from_rgb(0, 170, 255));
+										});
+                                    });
+                                    row.col(|ui| {
+										if ui.checkbox(&mut app.always_on_top, "").clicked() {
+											if app.always_on_top {
+												ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop))
+											} else {
+												ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal))
+											}
+										}
+                                    });
+                                });
                             });
-                        });
                     });
 
                     ui.add_space(20.0); // Add space equivalent to BottomBar
