@@ -4,4 +4,4 @@
 
 Clickr is a desktop application written in Rust used for automating clicks.
 
-![Clickr_v1 0 0](https://github.com/xSwezan/Clickr/assets/101433236/58f72143-cf16-4abf-80a9-8230bf777b19)
+![Clickr-v1 1 0](https://github.com/user-attachments/assets/eed93f7c-ae21-4ca3-846d-e3d3fb232e60)
