@@ -8,8 +8,8 @@ use std::{
 
 use eframe::{
     egui::{
-        self, Align2, Color32, FontDefinitions, FontFamily, IconData, Margin, Rect, RichText,
-        Rounding, Sense,
+        self, Align2, Color32, FontDefinitions, FontFamily, IconData, Image, KeyboardShortcut,
+        Margin, Rect, Response, RichText, Rounding, Sense, Vec2,
     },
     CreationContext,
 };
@@ -48,6 +48,9 @@ enum IntervalMode {
     Random,
 }
 
+const TOGGLE_AUTO_CLICKER_SHORTCUT: KeyboardShortcut =
+    egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F6);
+
 fn percentage_distance_between_colors(a: Color32, b: Color32) -> f32 {
     let distance_r = a.r().abs_diff(b.r()) as f32;
     let distance_g = a.g().abs_diff(b.g()) as f32;
@@ -59,7 +62,7 @@ fn percentage_distance_between_colors(a: Color32, b: Color32) -> f32 {
     percentage
 }
 
-fn tag_label(ui: &mut egui::Ui, text: &str, color: Color32) {
+fn tag_label(ui: &mut egui::Ui, text: &str, color: Color32, icon: Option<Image>) {
     egui::Frame::default()
         .fill(color)
         .inner_margin(Margin::symmetric(5.0, 0.0))
@@ -67,6 +70,11 @@ fn tag_label(ui: &mut egui::Ui, text: &str, color: Color32) {
         .rounding(Rounding::same(3.0))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(3.0, 0.0);
+                if icon.is_some() {
+                    ui.add_sized([12.0, 12.0], icon.unwrap());
+                }
+
                 ui.label(
                     egui::RichText::new(text)
                         .color(egui::Color32::WHITE)
@@ -74,6 +82,58 @@ fn tag_label(ui: &mut egui::Ui, text: &str, color: Color32) {
                 );
             });
         });
+}
+
+fn beta_tag(ui: &mut egui::Ui) {
+    tag_label(ui, "BETA", Color32::from_rgb(0, 170, 255), None);
+}
+
+fn danger_tag(ui: &mut egui::Ui, text: &str) {
+    tag_label(
+        ui,
+        text,
+        Color32::from_rgb(255, 0, 0),
+        Some(Image::new(egui::include_image!("./assets/Warning.png"))),
+    );
+}
+
+fn warning_tag(ui: &mut egui::Ui, text: &str) {
+    tag_label(
+        ui,
+        text,
+        Color32::from_rgb(230, 140, 0),
+        Some(Image::new(egui::include_image!("./assets/Warning.png"))),
+    );
+}
+
+fn setting_label(ui: &mut egui::Ui, text: &str) -> Response {
+    ui.label(
+        RichText::new(text).color(ui.style().visuals.text_color()),
+        // .family(egui::FontFamily::Name("InterBold".into()))
+    )
+}
+
+fn big_header(ui: &mut egui::Ui, text: &str, image: Image) {
+    egui::Frame::popup(&ui.ctx().style())
+        .fill(Color32::from_rgb(0, 170, 255))
+        .show(ui, |ui| {
+            let mut available = ui.available_rect_before_wrap();
+            available.set_height(0.0);
+            ui.allocate_rect(available, Sense::focusable_noninteractive());
+            ui.horizontal(|ui| {
+                ui.add_sized([20.0, 20.0], image);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(text)
+                            .heading()
+                            .text_style(egui::TextStyle::Heading)
+                            .color(Color32::WHITE),
+                    )
+                    .selectable(false),
+                );
+            });
+        });
+    ui.add_space(10.0);
 }
 
 fn main() -> Result<(), eframe::Error> {
@@ -151,6 +211,8 @@ impl AppHolder {
             total_clicks: 0,
 
             always_on_top: true,
+            focused: true,
+            compact_mode: false,
         };
 
         let app_arc = Arc::new(Mutex::new(new_app));
@@ -207,6 +269,140 @@ impl AppHolder {
         self.main_app.lock().unwrap()
     }
 
+    fn enabled_shield(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().inner_margin(Margin::same(10.0)))
+            .show(ctx, |ui| {
+                // Hide content with transparent black overlay when clicker is enabled
+                ui.painter().rect_filled(
+                    ui.clip_rect(),
+                    Rounding::ZERO,
+                    Color32::from_black_alpha(200),
+                );
+                egui::Image::new(egui::include_image!("./assets/Click.png")).paint_at(
+                    ui,
+                    Rect::from_center_size(ui.clip_rect().center(), [50.0, 50.0].into()),
+                );
+
+                let app = self.app();
+                if app.clicker_enabled {
+                    egui::Frame::popup(&ctx.style()).show(ui, |ui| {
+                        ui.push_id(ui.next_auto_id(), |ui| {
+                            const ROW_HEIGHT: f32 = 10.0;
+                            TableBuilder::new(ui)
+                                .column(Column::auto())
+                                .column(Column::remainder())
+                                .striped(true)
+                                .resizable(false)
+                                .body(|mut body| {
+                                    body.row(ROW_HEIGHT, |mut row| {
+                                        row.col(|ui| {
+                                            ui.push_id(ui.next_auto_id(), |ui| {
+                                                ui.label("Time");
+                                            });
+                                        });
+                                        row.col(|ui| {
+                                            ui.push_id(ui.next_auto_id(), |ui| {
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "{:.2}",
+                                                        Instant::now()
+                                                            .duration_since(app.clicker_start_time)
+                                                            .as_secs_f64()
+                                                    ))
+                                                    .color(ui.style().visuals.strong_text_color()),
+                                                );
+                                            });
+                                        });
+                                    });
+                                    body.row(ROW_HEIGHT, |mut row| {
+                                        row.col(|ui| {
+                                            ui.push_id(ui.next_auto_id(), |ui| {
+                                                ui.label("Clicks");
+                                            });
+                                        });
+                                        row.col(|ui| {
+                                            ui.push_id(ui.next_auto_id(), |ui| {
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        RichText::new(format!(
+                                                            "{}",
+                                                            app.total_clicks
+                                                        ))
+                                                        .color(
+                                                            ui.style().visuals.strong_text_color(),
+                                                        ),
+                                                    );
+                                                    if app.focused {
+                                                        warning_tag(
+                                                            ui,
+                                                            "UNFOCUS THE WINDOW TO CLICK!",
+                                                        );
+                                                    }
+                                                });
+                                            });
+                                        });
+                                    });
+                                });
+                        });
+                    });
+                }
+            });
+    }
+
+    fn menu_bar(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            if ui.input_mut(|i| i.consume_shortcut(&TOGGLE_AUTO_CLICKER_SHORTCUT)) {
+                self.toggle_clicker();
+            }
+
+            ctx.input(|i| {
+                self.app_mut().focused = i.viewport().focused.unwrap();
+            });
+
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("Actions", |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(if self.app().clicker_enabled {
+                                "Stop Auto Clicker"
+                            } else {
+                                "Start Auto Clicker"
+                            })
+                            .shortcut_text(ui.ctx().format_shortcut(&TOGGLE_AUTO_CLICKER_SHORTCUT)),
+                        )
+                        .clicked()
+                    {
+                        self.toggle_clicker();
+                    }
+
+                    if ui
+                        .checkbox(&mut self.app_mut().compact_mode, "Compact Mode")
+                        .clicked()
+                    {
+                        if self.app().compact_mode {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(
+                                200.0, 100.0,
+                            )));
+                        } else {
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(
+                                400.0, 410.0,
+                            )));
+                        }
+                    }
+                });
+
+                ui.painter().text(
+                    ui.available_rect_before_wrap().right_center(),
+                    Align2::RIGHT_CENTER,
+                    env!("CARGO_PKG_VERSION"),
+                    egui::FontId::proportional(10.0),
+                    ui.style().visuals.weak_text_color(),
+                );
+            });
+        });
+    }
+
     fn click_loop(&mut self) {
         let mut app = self.app_mut();
         app.total_clicks = 0;
@@ -241,12 +437,13 @@ impl AppHolder {
                 _ => {}
             }
 
-            let should_click: bool = !app.color_mode
-                || (app.color_mode
-                    && percentage_distance_between_colors(
-                        app.hovering_pixel_color,
-                        app.color_mode_color,
-                    ) <= app.color_mode_distance_threshold as f32 / 255.0);
+            let should_click: bool = !app.focused
+                && (!app.color_mode
+                    || (app.color_mode
+                        && percentage_distance_between_colors(
+                            app.hovering_pixel_color,
+                            app.color_mode_color,
+                        ) <= app.color_mode_distance_threshold as f32 / 255.0));
 
             if should_click {
                 app.mouse_is_pressed = !app.mouse_is_pressed;
@@ -326,6 +523,8 @@ struct App {
     total_clicks: u32,
 
     always_on_top: bool,
+    focused: bool,
+    compact_mode: bool,
 }
 
 impl App {
@@ -337,6 +536,11 @@ impl App {
         };
 
         match self.click_mode {
+            ClickMode::Single => self.mouse.click(&button).expect("Unable to click button"),
+            ClickMode::Double => {
+                self.mouse.click(&button).expect("Unable to click button");
+                self.mouse.click(&button).expect("Unable to click button");
+            }
             ClickMode::Toggle => {
                 if self.mouse_is_pressed {
                     self.mouse.press(&button).expect("Unable to press button");
@@ -345,11 +549,6 @@ impl App {
                         .release(&button)
                         .expect("Unable to release button");
                 }
-            }
-            ClickMode::Single => self.mouse.click(&button).expect("Unable to click button"),
-            ClickMode::Double => {
-                self.mouse.click(&button).expect("Unable to click button");
-                self.mouse.click(&button).expect("Unable to click button");
             }
         }
     }
@@ -372,6 +571,8 @@ impl App {
 
 impl eframe::App for AppHolder {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.menu_bar(ctx);
+
         egui::CentralPanel::default().show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let app = self.app();
@@ -382,35 +583,11 @@ impl eframe::App for AppHolder {
                     let mut app = self.app_mut();
 
                     egui::Frame::popup(&ctx.style()).show(ui, |ui| {
-                        egui::Frame::popup(&ctx.style())
-                            .fill(Color32::from_rgb(0, 170, 255))
-                            .show(ui, |ui| {
-                                let mut available = ui.available_rect_before_wrap();
-                                available.set_height(0.0);
-                                ui.allocate_rect(available, Sense::focusable_noninteractive());
-                                ui.horizontal(|ui| {
-                                    ui.add_sized(
-                                        [20.0, 20.0],
-                                        egui::Image::new(egui::include_image!(
-                                            "./assets/ClickInterval.png"
-                                        )),
-                                    );
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new("Click Interval")
-                                                .heading()
-                                                .text_style(egui::TextStyle::Heading)
-                                                .color(Color32::WHITE),
-                                        )
-                                        .selectable(false),
-                                    );
-                                });
-                            });
-                        ui.add_space(10.0);
+                        big_header(ui, "Click Interval", egui::Image::new(egui::include_image!("./assets/ClickInterval.png")));
 
                         ui.vertical(|ui| {
                             if ui
-                                .radio(app.interval_mode == IntervalMode::Constant, "Set Time")
+                                .radio(app.interval_mode == IntervalMode::Constant, "Constant")
                                 .clicked()
                             {
                                 app.interval_mode = IntervalMode::Constant;
@@ -454,7 +631,7 @@ impl eframe::App for AppHolder {
                             if ui
                                 .radio(
                                     app.interval_mode == IntervalMode::Random,
-                                    "Set Random Interval",
+                                    "Random Interval",
                                 )
                                 .clicked()
                             {
@@ -511,93 +688,20 @@ impl eframe::App for AppHolder {
                         };
                         let cps: u32 = (1.0 / total_seconds) as u32;
 
-                        // if total_seconds == 0.0 {
-                        //     ui.monospace("Estimated CPS: >10000");
-                        // } else if cps > 0 {
-                        //     ui.monospace(format!("Estimated CPS: ~{}", cps));
-                        // }
 
-                        if cps >= 2000 {
-                            let warning_color = Color32::from_rgb(255, 0, 0);
-                            ui.horizontal(|ui| {
-                                ui.add(
-                                    egui::Image::new(egui::include_image!("./assets/Warning.png"))
-                                        .tint(warning_color),
-                                );
-                                ui.colored_label(
-                                    warning_color,
-                                    RichText::new("Your system may lag much!").monospace(),
-                                );
-                            });
-                        } else if cps >= 200 {
-                            let warning_color = Color32::from_rgb(255, 255, 0);
-                            ui.horizontal(|ui| {
-                                ui.add(
-                                    egui::Image::new(egui::include_image!("./assets/Warning.png"))
-                                        .tint(warning_color),
-                                );
-                                ui.colored_label(
-                                    warning_color,
-                                    RichText::new("Your system may lag!").monospace(),
-                                );
-                            });
-                        }
+						if cps >= 2000 {
+							danger_tag(ui, "YOUR SYSTEM MAY SLOW DOWN!");
+						} else if cps >= 200 {
+							ui.vertical_centered(|ui| {
+								warning_tag(ui, "YOUR SYSTEM MAY SLOW DOWN!");
+							});
+						}
                     });
 
                     ui.add_space(15.0);
 
                     egui::Frame::popup(&ctx.style()).show(ui, |ui| {
-                        egui::Frame::popup(&ctx.style())
-                            .fill(Color32::from_rgb(0, 170, 255))
-                            .show(ui, |ui| {
-                                let mut available = ui.available_rect_before_wrap();
-                                available.set_height(0.0);
-                                ui.allocate_rect(available, Sense::focusable_noninteractive());
-                                ui.horizontal(|ui| {
-                                    ui.add_sized(
-                                        [20.0, 20.0],
-                                        egui::Image::new(egui::include_image!("./assets/Cog.png")),
-                                    );
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new("Settings")
-                                                .heading()
-                                                .text_style(egui::TextStyle::Heading)
-                                                .color(Color32::WHITE),
-                                        )
-                                        .selectable(false),
-                                    );
-                                });
-                            });
-                        ui.add_space(10.0);
-
-                        // ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                        //     if ui
-                        //         .add_sized(
-                        //             [50.0, 50.0],
-                        //             egui::ImageButton::new(match app.mouse_button {
-                        //                 MouseButton::Left => {
-                        //                     egui::include_image!("./assets/MouseLeft.png")
-                        //                 }
-                        //                 MouseButton::Middle => {
-                        //                     egui::include_image!("./assets/MouseMiddle.png")
-                        //                 }
-                        //                 MouseButton::Right => {
-                        //                     egui::include_image!("./assets/MouseRight.png")
-                        //                 }
-                        //             })
-                        //             .frame(false),
-                        //         )
-                        //         .on_hover_and_drag_cursor(egui::CursorIcon::PointingHand)
-                        //         .clicked()
-                        //     {
-                        //         app.mouse_button = match app.mouse_button {
-                        //             MouseButton::Left => MouseButton::Middle,
-                        //             MouseButton::Middle => MouseButton::Right,
-                        //             MouseButton::Right => MouseButton::Left,
-                        //         }
-                        //     };
-                        // });
+                        big_header(ui, "Settings", egui::Image::new(egui::include_image!("./assets/Cog.png")));
 
 						const ROW_HEIGHT: f32 = 20.0;
                         TableBuilder::new(ui)
@@ -608,40 +712,9 @@ impl eframe::App for AppHolder {
                             .body(|mut body| {
                                 body.row(ROW_HEIGHT, |mut row| {
                                     row.col(|ui| {
-                                        ui.label(
-											RichText::new("Mouse Button")
-												.family(egui::FontFamily::Name("InterBold".into()))
-										);
+                                        setting_label(ui, "Mouse Button");
                                     });
                                     row.col(|ui| {
-										// ui.with_layout(Layout::left_to_right(egui::Align::Min).with_cross_align(egui::Align::Center), |ui| {
-										// 	if ui
-										// 		.add_sized(
-										// 			[40.0, 40.0],
-										// 			egui::ImageButton::new(match app.mouse_button {
-										// 				MouseButton::Left => {
-										// 					egui::include_image!("./assets/MouseLeft.png")
-										// 				}
-										// 				MouseButton::Middle => {
-										// 					egui::include_image!("./assets/MouseMiddle.png")
-										// 				}
-										// 				MouseButton::Right => {
-										// 					egui::include_image!("./assets/MouseRight.png")
-										// 				}
-										// 			})
-										// 			.frame(false),
-										// 		)
-										// 		.on_hover_and_drag_cursor(egui::CursorIcon::PointingHand)
-										// 		.clicked()
-										// 	{
-										// 		app.mouse_button = match app.mouse_button {
-										// 			MouseButton::Left => MouseButton::Middle,
-										// 			MouseButton::Middle => MouseButton::Right,
-										// 			MouseButton::Right => MouseButton::Left,
-										// 		}
-										// 	};
-										// });
-
 										egui::ComboBox::from_id_source("mousebutton")
                                             .selected_text(format!("{}", app.mouse_button.as_ref()))
                                             .show_ui(ui, |ui| {
@@ -653,20 +726,11 @@ impl eframe::App for AppHolder {
                                                     );
                                                 }
                                             });
-
-										// ui.horizontal(|ui| {
-										// 	ui.selectable_value(&mut app.mouse_button, MouseButton::Left, "Left");
-										// 	ui.selectable_value(&mut app.mouse_button, MouseButton::Middle, "Middle");
-										// 	ui.selectable_value(&mut app.mouse_button, MouseButton::Right, "Right");
-										// });
                                     });
                                 });
                                 body.row(ROW_HEIGHT, |mut row| {
                                     row.col(|ui| {
-                                        ui.label(
-											RichText::new("Click Mode")
-												.family(egui::FontFamily::Name("InterBold".into()))
-										);
+                                        setting_label(ui, "Click Mode");
                                     });
                                     row.col(|ui| {
                                         egui::ComboBox::from_id_source("clickmode")
@@ -684,10 +748,7 @@ impl eframe::App for AppHolder {
                                 });
                                 body.row(ROW_HEIGHT, |mut row| {
                                     row.col(|ui| {
-                                        ui.label(
-											RichText::new("Limit Mode")
-												.family(egui::FontFamily::Name("InterBold".into()))
-										);
+                                        setting_label(ui, "Limit Mode");
                                     });
                                     row.col(|ui| {
 										ui.horizontal(|ui| {
@@ -736,11 +797,8 @@ impl eframe::App for AppHolder {
                                 body.row(ROW_HEIGHT, |mut row| {
                                     row.col(|ui| {
 										ui.horizontal(|ui| {
-											ui.label(
-												RichText::new("Color Mode")
-													.family(egui::FontFamily::Name("InterBold".into()))
-											).on_hover_text("If enabled, the auto clicker will only click if the cursor's current\nhovering pixel has the same color as the set Color property.");
-											tag_label(ui, "BETA", Color32::from_rgb(0, 170, 255));
+											setting_label(ui, "Color Mode").on_hover_text("If enabled, the auto clicker will only click if the cursor's current\nhovering pixel has the same color as the set Color property.");
+											beta_tag(ui);
 										});
                                     });
                                     row.col(|ui| {
@@ -764,26 +822,9 @@ impl eframe::App for AppHolder {
 														ui.label("Color").on_hover_text("The color of pixel that you need the cursor to hover over for the\nauto clicker to click.");
 													});
 													ui.horizontal(|ui| {
-														// ui.add(egui::Slider::new(
-														// 	&mut app.color_mode_distance_threshold,
-														// 	0f32..=1f32,
-														// ));
 														ui.add(egui::DragValue::new(&mut app.color_mode_distance_threshold).range(0u8..=255u8));
 														ui.label("Threshold").on_hover_text("This setting lets you set a threshold distance for the Color property.\n\n0.0 = Color has to be the exact same\n1.0 = Color can be any color (any distance is accepted)");
 													});
-													// ui.horizontal(|ui| {
-													//     ui.color_edit_button_srgba(
-													//         &mut app.hovering_pixel_color.clone(),
-													//     );
-													//     ui.label("Hovering Color");
-													// });
-													// let percentage = percentage_distance_between_colors(
-													//     app.hovering_pixel_color,
-													//     app.color_mode_color,
-													// );
-													// if percentage <= app.color_mode_distance_threshold {
-													//     ui.label("YES");
-													// }
 												});
 											}
 										});
@@ -792,11 +833,8 @@ impl eframe::App for AppHolder {
                                 body.row(ROW_HEIGHT, |mut row| {
                                     row.col(|ui| {
 										ui.horizontal(|ui| {
-											ui.label(
-												RichText::new("Always On Top")
-													.family(egui::FontFamily::Name("InterBold".into()))
-											);
-											tag_label(ui, "BETA", Color32::from_rgb(0, 170, 255));
+											setting_label(ui, "Always On Top");
+											beta_tag(ui);
 										});
                                     });
                                     row.col(|ui| {
@@ -811,8 +849,6 @@ impl eframe::App for AppHolder {
                                 });
                             });
                     });
-
-                    ui.add_space(20.0); // Add space equivalent to BottomBar
 
                     drop(app);
                     let app = self.app();
@@ -833,69 +869,11 @@ impl eframe::App for AppHolder {
                     }
                 });
             });
-
-            // Hide content with transparent black overlay when clicker is enabled
-            if self.app().clicker_enabled {
-                ui.painter().rect_filled(
-                    ui.clip_rect(),
-                    Rounding::ZERO,
-                    Color32::from_black_alpha(200),
-                );
-                // ui.painter().text(
-                //     ui.clip_rect().center(),
-                //     Align2::CENTER_CENTER,
-                //     "CLICKING",
-                //     FontId::proportional(20.0),
-                //     ui.style().visuals.text_color(),
-                // );
-                egui::Image::new(egui::include_image!("./assets/Click.png")).paint_at(
-                    ui,
-                    Rect::from_center_size(ui.clip_rect().center(), [50.0, 50.0].into()),
-                );
-            }
         });
 
-        egui::TopBottomPanel::bottom("BottomBar").show(&ctx, |ui| {
-            let start_shortcut = egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F6);
-            if ui.input_mut(|i| i.consume_shortcut(&start_shortcut)) {
-                self.toggle_clicker();
-            }
-
-            egui::menu::bar(ui, |ui| {
-                if ui
-                    .add(egui::ImageButton::new(if self.app().clicker_enabled {
-                        egui::include_image!("./assets/Pause.png")
-                    } else {
-                        egui::include_image!("./assets/Play.png")
-                    }))
-                    .clicked()
-                {
-                    self.toggle_clicker();
-                };
-
-                let app = self.app();
-                if app.clicker_enabled {
-                    ui.label(format!(
-                        "Time: {:.2}",
-                        Instant::now()
-                            .duration_since(app.clicker_start_time)
-                            .as_secs_f64()
-                    ));
-                    ui.label(format!("Clicks: {}", app.total_clicks));
-                    if app.click_mode == ClickMode::Toggle {
-                        ui.label(format!("Pressed: {}", app.mouse_is_pressed));
-                    }
-                }
-
-                ui.painter().text(
-                    ui.available_rect_before_wrap().right_bottom(),
-                    Align2::RIGHT_BOTTOM,
-                    env!("CARGO_PKG_VERSION"),
-                    egui::FontId::proportional(10.0),
-                    ui.style().visuals.text_color(),
-                );
-            });
-        });
+        if self.app().clicker_enabled {
+            self.enabled_shield(ctx);
+        }
 
         ctx.request_repaint();
     }
