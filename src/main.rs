@@ -9,7 +9,7 @@ use std::{
 use eframe::{
     egui::{
         self, Align2, Color32, FontDefinitions, FontFamily, IconData, Image, KeyboardShortcut,
-        Margin, Rect, Response, RichText, Rounding, Sense, Vec2,
+        Layout, Margin, Rect, Response, RichText, Rounding, Sense, Vec2,
     },
     CreationContext,
 };
@@ -48,6 +48,8 @@ enum IntervalMode {
     Random,
 }
 
+const COMPACT_WINDOW_SIZE: Vec2 = Vec2::new(200.0, 80.0);
+const WINDOW_SIZE: Vec2 = Vec2::new(400.0, 410.0);
 const TOGGLE_AUTO_CLICKER_SHORTCUT: KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F6);
 
@@ -269,7 +271,7 @@ impl AppHolder {
         self.main_app.lock().unwrap()
     }
 
-    fn enabled_shield(&mut self, ctx: &egui::Context) {
+    fn click_shield(&mut self, ctx: &egui::Context) {
         egui::CentralPanel::default()
             .frame(egui::Frame::none().inner_margin(Margin::same(10.0)))
             .show(ctx, |ui| {
@@ -350,6 +352,46 @@ impl AppHolder {
             });
     }
 
+    fn compact_click_shield(&mut self, ctx: &egui::Context) {
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().inner_margin(Margin::same(10.0)))
+            .show(ctx, |ui| {
+                // Hide content with transparent black overlay when clicker is enabled
+                ui.painter().rect_filled(
+                    ui.clip_rect(),
+                    Rounding::ZERO,
+                    Color32::from_black_alpha(200),
+                );
+                egui::Image::new(egui::include_image!("./assets/Click.png")).paint_at(
+                    ui,
+                    Rect::from_min_size(ui.clip_rect().right_center(), [50.0, 50.0].into()),
+                );
+
+                egui::Grid::new("compact_click_shield_grid").show(ui, |ui| {
+                    let app = self.app();
+
+                    ui.label("Time");
+                    ui.label(
+                        RichText::new(format!(
+                            "{:.2}",
+                            Instant::now()
+                                .duration_since(app.clicker_start_time)
+                                .as_secs_f64()
+                        ))
+                        .color(ui.style().visuals.strong_text_color()),
+                    );
+                    ui.end_row();
+
+                    ui.label("Clicks");
+                    ui.label(
+                        RichText::new(format!("{}", app.total_clicks))
+                            .color(ui.style().visuals.strong_text_color()),
+                    );
+                    ui.end_row();
+                });
+            });
+    }
+
     fn menu_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             if ui.input_mut(|i| i.consume_shortcut(&TOGGLE_AUTO_CLICKER_SHORTCUT)) {
@@ -381,13 +423,11 @@ impl AppHolder {
                         .clicked()
                     {
                         if self.app().compact_mode {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(
-                                200.0, 100.0,
-                            )));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(
+                                COMPACT_WINDOW_SIZE,
+                            ));
                         } else {
-                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(Vec2::new(
-                                400.0, 410.0,
-                            )));
+                            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(WINDOW_SIZE));
                         }
                     }
                 });
@@ -471,6 +511,297 @@ impl AppHolder {
 
             sleep(Duration::from_secs_f64(time_to_wait));
         }
+    }
+
+    fn show_menu(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+			let app = self.app();
+			let enabled = !app.clicker_enabled;
+			drop(app);
+
+			ui.add_enabled_ui(enabled, |ui| {
+				let mut app = self.app_mut();
+
+				egui::Frame::popup(&ui.ctx().style()).show(ui, |ui| {
+					big_header(ui, "Click Interval", egui::Image::new(egui::include_image!("./assets/ClickInterval.png")));
+
+					ui.vertical(|ui| {
+						if ui
+							.radio(app.interval_mode == IntervalMode::Constant, "Constant")
+							.clicked()
+						{
+							app.interval_mode = IntervalMode::Constant;
+						}
+
+						ui.add_enabled_ui(app.interval_mode == IntervalMode::Constant, |ui| {
+							ui.columns(4, |columns| {
+								let mut h = app.hours;
+								let mut m = app.minutes;
+								let mut s = app.seconds;
+								let mut ms = app.milliseconds;
+
+								let fields = [
+									("h", &mut h),
+									("m", &mut m),
+									("s", &mut s),
+									("ms", &mut ms),
+								];
+								fields.into_iter().enumerate().for_each(
+									|(i, (suffix, value))| {
+										columns[i].push_id(i, |ui| {
+											ui.add(
+												egui::DragValue::new(value)
+													.suffix(suffix)
+													.speed(1)
+													.max_decimals(0),
+											)
+										});
+									},
+								);
+
+								app.hours = h;
+								app.minutes = m;
+								app.seconds = s;
+								app.milliseconds = ms;
+							});
+						});
+
+						ui.add_space(15.0);
+
+						if ui
+							.radio(
+								app.interval_mode == IntervalMode::Random,
+								"Random Interval",
+							)
+							.clicked()
+						{
+							app.interval_mode = IntervalMode::Random;
+						}
+
+						ui.add_enabled_ui(app.interval_mode == IntervalMode::Random, |ui| {
+							ui.columns(2, |columns| {
+								let mut min = app.interval_mode_random_min;
+								let mut max = app.interval_mode_random_max;
+
+								max = max.clamp(0.0, 3600.0);
+								min = min.clamp(0.0, max);
+
+								let fields = [&mut min, &mut max];
+								fields.into_iter().enumerate().for_each(|(i, value)| {
+									columns[i].push_id(i, |ui| {
+										ui.add(
+											egui::DragValue::new(value)
+												.suffix("s")
+												.speed(0.1)
+												.min_decimals(1)
+												.range(0..=3600)
+												.update_while_editing(false)
+												.max_decimals(3),
+										);
+									});
+								});
+
+								app.interval_mode_random_min = min;
+								app.interval_mode_random_max = max;
+							});
+						});
+						ui.add_enabled_ui(app.interval_mode == IntervalMode::Random, |ui| {
+							ui.columns(2, |columns| {
+								let fields = ["Min", "Max"];
+								fields.into_iter().enumerate().for_each(|(i, text)| {
+									columns[i].push_id(i, |ui| {
+										ui.label(text);
+									});
+								});
+							});
+						});
+					});
+
+					let total_seconds: f64 = match app.interval_mode {
+						IntervalMode::Constant => {
+							app.hours as f64 * 3600.0
+								+ app.minutes as f64 * 60.0
+								+ app.seconds as f64
+								+ app.milliseconds as f64 / 1000.0
+						}
+						IntervalMode::Random => app.interval_mode_random_min as f64,
+					};
+					let cps: u32 = (1.0 / total_seconds) as u32;
+
+
+					if cps >= 2000 {
+						danger_tag(ui, "YOUR SYSTEM MAY SLOW DOWN!");
+					} else if cps >= 200 {
+						ui.vertical_centered(|ui| {
+							warning_tag(ui, "YOUR SYSTEM MAY SLOW DOWN!");
+						});
+					}
+				});
+
+				ui.add_space(15.0);
+
+				egui::Frame::popup(&ui.ctx().style()).show(ui, |ui| {
+					big_header(ui, "Settings", egui::Image::new(egui::include_image!("./assets/Cog.png")));
+
+					const ROW_HEIGHT: f32 = 20.0;
+					TableBuilder::new(ui)
+						.column(Column::auto().resizable(false))
+						.column(Column::remainder())
+						.striped(true)
+						.resizable(false)
+						.body(|mut body| {
+							body.row(ROW_HEIGHT, |mut row| {
+								row.col(|ui| {
+									setting_label(ui, "Mouse Button");
+								});
+								row.col(|ui| {
+									egui::ComboBox::from_id_source("mousebutton")
+										.selected_text(format!("{}", app.mouse_button.as_ref()))
+										.show_ui(ui, |ui| {
+											for mouse_button in MouseButton::iter() {
+												ui.selectable_value(
+													&mut app.mouse_button,
+													mouse_button,
+													mouse_button.as_ref(),
+												);
+											}
+										});
+								});
+							});
+							body.row(ROW_HEIGHT, |mut row| {
+								row.col(|ui| {
+									setting_label(ui, "Click Mode");
+								});
+								row.col(|ui| {
+									egui::ComboBox::from_id_source("clickmode")
+										.selected_text(format!("{}", app.click_mode.as_ref()))
+										.show_ui(ui, |ui| {
+											for click_mode in ClickMode::iter() {
+												ui.selectable_value(
+													&mut app.click_mode,
+													click_mode,
+													click_mode.as_ref(),
+												);
+											}
+										});
+								});
+							});
+							body.row(ROW_HEIGHT, |mut row| {
+								row.col(|ui| {
+									setting_label(ui, "Limit Mode");
+								});
+								row.col(|ui| {
+									ui.horizontal(|ui| {
+										egui::ComboBox::from_id_source("limitmode")
+											.selected_text(format!("{}", app.limit_mode.as_ref()))
+											.show_ui(ui, |ui| {
+												for limit_mode in LimitMode::iter() {
+													ui.selectable_value(
+														&mut app.limit_mode,
+														limit_mode,
+														limit_mode.as_ref(),
+													);
+												}
+											});
+
+										match app.limit_mode {
+											LimitMode::Clicks => {
+												ui.horizontal(|ui| {
+													ui.add(
+														egui::DragValue::new(
+															&mut app.limit_mode_clicks_amount,
+														)
+														.speed(1)
+														.max_decimals(0),
+													);
+													ui.label("Clicks");
+												});
+											}
+											LimitMode::Time => {
+												ui.horizontal(|ui| {
+													ui.add(
+														egui::DragValue::new(
+															&mut app.limit_mode_time,
+														)
+														.speed(0.25)
+														.max_decimals(3),
+													);
+													ui.label("Seconds");
+												});
+											}
+											_ => {}
+										}
+									});
+								});
+							});
+							body.row(ROW_HEIGHT, |mut row| {
+								row.col(|ui| {
+									ui.horizontal(|ui| {
+										setting_label(ui, "Color Mode").on_hover_text("If enabled, the auto clicker will only click if the cursor's current\nhovering pixel has the same color as the set Color property.");
+										beta_tag(ui);
+									});
+								});
+								row.col(|ui| {
+									ui.horizontal(|ui| {
+										ui.checkbox(&mut app.color_mode, "");
+										ui.add_space(-10.0);
+										if app.color_mode {
+											egui::CollapsingHeader::new("Settings").show_unindented(ui, |ui| {
+												if app.color_mode {
+													let mouse_location = autopilot::mouse::location();
+													let result = autopilot::screen::get_color(mouse_location);
+													if result.is_ok() {
+														let pixel = result.unwrap();
+														app.hovering_pixel_color =
+															Color32::from_rgb(pixel.0[0], pixel.0[1], pixel.0[2]);
+													}
+												}
+
+												ui.horizontal(|ui| {
+													ui.color_edit_button_srgba(&mut app.color_mode_color);
+													ui.label("Color").on_hover_text("The color of pixel that you need the cursor to hover over for the\nauto clicker to click.");
+												});
+												ui.horizontal(|ui| {
+													ui.add(egui::DragValue::new(&mut app.color_mode_distance_threshold).range(0u8..=255u8));
+													ui.label("Threshold").on_hover_text("This setting lets you set a threshold distance for the Color property.\n\n0.0 = Color has to be the exact same\n1.0 = Color can be any color (any distance is accepted)");
+												});
+											});
+										}
+									});
+								});
+							});
+							body.row(ROW_HEIGHT, |mut row| {
+								row.col(|ui| {
+									ui.horizontal(|ui| {
+										setting_label(ui, "Always On Top");
+										beta_tag(ui);
+									});
+								});
+								row.col(|ui| {
+									if ui.checkbox(&mut app.always_on_top, "").clicked() {
+										if app.always_on_top {
+											ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop))
+										} else {
+											ui.ctx().send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal))
+										}
+									}
+								});
+							});
+						});
+				});
+			});
+		});
+    }
+
+    fn show_compact_menu(&mut self, ui: &mut egui::Ui) {
+        ui.with_layout(
+            Layout::centered_and_justified(egui::Direction::LeftToRight),
+            |ui| {
+                ui.label(
+                    RichText::new("Compact Mode").color(ui.style().visuals.strong_text_color()),
+                );
+            },
+        );
     }
 
     fn start_clicker(&self) {
@@ -574,305 +905,36 @@ impl eframe::App for AppHolder {
         self.menu_bar(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                let app = self.app();
-                let enabled = !app.clicker_enabled;
-                drop(app);
-
-                ui.add_enabled_ui(enabled, |ui| {
-                    let mut app = self.app_mut();
-
-                    egui::Frame::popup(&ctx.style()).show(ui, |ui| {
-                        big_header(ui, "Click Interval", egui::Image::new(egui::include_image!("./assets/ClickInterval.png")));
-
-                        ui.vertical(|ui| {
-                            if ui
-                                .radio(app.interval_mode == IntervalMode::Constant, "Constant")
-                                .clicked()
-                            {
-                                app.interval_mode = IntervalMode::Constant;
-                            }
-
-                            ui.add_enabled_ui(app.interval_mode == IntervalMode::Constant, |ui| {
-                                ui.columns(4, |columns| {
-                                    let mut h = app.hours;
-                                    let mut m = app.minutes;
-                                    let mut s = app.seconds;
-                                    let mut ms = app.milliseconds;
-
-                                    let fields = [
-                                        ("h", &mut h),
-                                        ("m", &mut m),
-                                        ("s", &mut s),
-                                        ("ms", &mut ms),
-                                    ];
-                                    fields.into_iter().enumerate().for_each(
-                                        |(i, (suffix, value))| {
-                                            columns[i].push_id(i, |ui| {
-                                                ui.add(
-                                                    egui::DragValue::new(value)
-                                                        .suffix(suffix)
-                                                        .speed(1)
-                                                        .max_decimals(0),
-                                                )
-                                            });
-                                        },
-                                    );
-
-                                    app.hours = h;
-                                    app.minutes = m;
-                                    app.seconds = s;
-                                    app.milliseconds = ms;
-                                });
-                            });
-
-                            ui.add_space(15.0);
-
-                            if ui
-                                .radio(
-                                    app.interval_mode == IntervalMode::Random,
-                                    "Random Interval",
-                                )
-                                .clicked()
-                            {
-                                app.interval_mode = IntervalMode::Random;
-                            }
-
-                            ui.add_enabled_ui(app.interval_mode == IntervalMode::Random, |ui| {
-                                ui.columns(2, |columns| {
-                                    let mut min = app.interval_mode_random_min;
-                                    let mut max = app.interval_mode_random_max;
-
-                                    max = max.clamp(0.0, 3600.0);
-                                    min = min.clamp(0.0, max);
-
-                                    let fields = [&mut min, &mut max];
-                                    fields.into_iter().enumerate().for_each(|(i, value)| {
-                                        columns[i].push_id(i, |ui| {
-                                            ui.add(
-                                                egui::DragValue::new(value)
-                                                    .suffix("s")
-                                                    .speed(0.1)
-                                                    .min_decimals(1)
-                                                    .range(0..=3600)
-                                                    .update_while_editing(false)
-                                                    .max_decimals(3),
-                                            );
-                                        });
-                                    });
-
-                                    app.interval_mode_random_min = min;
-                                    app.interval_mode_random_max = max;
-                                });
-                            });
-                            ui.add_enabled_ui(app.interval_mode == IntervalMode::Random, |ui| {
-                                ui.columns(2, |columns| {
-                                    let fields = ["Min", "Max"];
-                                    fields.into_iter().enumerate().for_each(|(i, text)| {
-                                        columns[i].push_id(i, |ui| {
-                                            ui.label(text);
-                                        });
-                                    });
-                                });
-                            });
-                        });
-
-                        let total_seconds: f64 = match app.interval_mode {
-                            IntervalMode::Constant => {
-                                app.hours as f64 * 3600.0
-                                    + app.minutes as f64 * 60.0
-                                    + app.seconds as f64
-                                    + app.milliseconds as f64 / 1000.0
-                            }
-                            IntervalMode::Random => app.interval_mode_random_min as f64,
-                        };
-                        let cps: u32 = (1.0 / total_seconds) as u32;
-
-
-						if cps >= 2000 {
-							danger_tag(ui, "YOUR SYSTEM MAY SLOW DOWN!");
-						} else if cps >= 200 {
-							ui.vertical_centered(|ui| {
-								warning_tag(ui, "YOUR SYSTEM MAY SLOW DOWN!");
-							});
-						}
-                    });
-
-                    ui.add_space(15.0);
-
-                    egui::Frame::popup(&ctx.style()).show(ui, |ui| {
-                        big_header(ui, "Settings", egui::Image::new(egui::include_image!("./assets/Cog.png")));
-
-						const ROW_HEIGHT: f32 = 20.0;
-                        TableBuilder::new(ui)
-                            .column(Column::auto().resizable(false))
-                            .column(Column::remainder())
-							.striped(true)
-							.resizable(false)
-                            .body(|mut body| {
-                                body.row(ROW_HEIGHT, |mut row| {
-                                    row.col(|ui| {
-                                        setting_label(ui, "Mouse Button");
-                                    });
-                                    row.col(|ui| {
-										egui::ComboBox::from_id_source("mousebutton")
-                                            .selected_text(format!("{}", app.mouse_button.as_ref()))
-                                            .show_ui(ui, |ui| {
-                                                for mouse_button in MouseButton::iter() {
-                                                    ui.selectable_value(
-                                                        &mut app.mouse_button,
-                                                        mouse_button,
-                                                        mouse_button.as_ref(),
-                                                    );
-                                                }
-                                            });
-                                    });
-                                });
-                                body.row(ROW_HEIGHT, |mut row| {
-                                    row.col(|ui| {
-                                        setting_label(ui, "Click Mode");
-                                    });
-                                    row.col(|ui| {
-                                        egui::ComboBox::from_id_source("clickmode")
-                                            .selected_text(format!("{}", app.click_mode.as_ref()))
-                                            .show_ui(ui, |ui| {
-                                                for click_mode in ClickMode::iter() {
-                                                    ui.selectable_value(
-                                                        &mut app.click_mode,
-                                                        click_mode,
-                                                        click_mode.as_ref(),
-                                                    );
-                                                }
-                                            });
-                                    });
-                                });
-                                body.row(ROW_HEIGHT, |mut row| {
-                                    row.col(|ui| {
-                                        setting_label(ui, "Limit Mode");
-                                    });
-                                    row.col(|ui| {
-										ui.horizontal(|ui| {
-											egui::ComboBox::from_id_source("limitmode")
-												.selected_text(format!("{}", app.limit_mode.as_ref()))
-												.show_ui(ui, |ui| {
-													for limit_mode in LimitMode::iter() {
-														ui.selectable_value(
-															&mut app.limit_mode,
-															limit_mode,
-															limit_mode.as_ref(),
-														);
-													}
-												});
-
-											match app.limit_mode {
-												LimitMode::Clicks => {
-													ui.horizontal(|ui| {
-														ui.add(
-															egui::DragValue::new(
-																&mut app.limit_mode_clicks_amount,
-															)
-															.speed(1)
-															.max_decimals(0),
-														);
-														ui.label("Clicks");
-													});
-												}
-												LimitMode::Time => {
-													ui.horizontal(|ui| {
-														ui.add(
-															egui::DragValue::new(
-																&mut app.limit_mode_time,
-															)
-															.speed(0.25)
-															.max_decimals(3),
-														);
-														ui.label("Seconds");
-													});
-												}
-												_ => {}
-											}
-										});
-                                    });
-                                });
-                                body.row(ROW_HEIGHT, |mut row| {
-                                    row.col(|ui| {
-										ui.horizontal(|ui| {
-											setting_label(ui, "Color Mode").on_hover_text("If enabled, the auto clicker will only click if the cursor's current\nhovering pixel has the same color as the set Color property.");
-											beta_tag(ui);
-										});
-                                    });
-                                    row.col(|ui| {
-										ui.horizontal(|ui| {
-											ui.checkbox(&mut app.color_mode, "");
-											ui.add_space(-10.0);
-											if app.color_mode {
-												egui::CollapsingHeader::new("Settings").show_unindented(ui, |ui| {
-													if app.color_mode {
-														let mouse_location = autopilot::mouse::location();
-														let result = autopilot::screen::get_color(mouse_location);
-														if result.is_ok() {
-															let pixel = result.unwrap();
-															app.hovering_pixel_color =
-																Color32::from_rgb(pixel.0[0], pixel.0[1], pixel.0[2]);
-														}
-													}
-
-													ui.horizontal(|ui| {
-														ui.color_edit_button_srgba(&mut app.color_mode_color);
-														ui.label("Color").on_hover_text("The color of pixel that you need the cursor to hover over for the\nauto clicker to click.");
-													});
-													ui.horizontal(|ui| {
-														ui.add(egui::DragValue::new(&mut app.color_mode_distance_threshold).range(0u8..=255u8));
-														ui.label("Threshold").on_hover_text("This setting lets you set a threshold distance for the Color property.\n\n0.0 = Color has to be the exact same\n1.0 = Color can be any color (any distance is accepted)");
-													});
-												});
-											}
-										});
-                                    });
-                                });
-                                body.row(ROW_HEIGHT, |mut row| {
-                                    row.col(|ui| {
-										ui.horizontal(|ui| {
-											setting_label(ui, "Always On Top");
-											beta_tag(ui);
-										});
-                                    });
-                                    row.col(|ui| {
-										if ui.checkbox(&mut app.always_on_top, "").clicked() {
-											if app.always_on_top {
-												ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::AlwaysOnTop))
-											} else {
-												ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(egui::WindowLevel::Normal))
-											}
-										}
-                                    });
-                                });
-                            });
-                    });
-
-                    drop(app);
-                    let app = self.app();
-                    let enabled_changed = app.clicker_enabled != app.last_clicker_enabled;
-                    drop(app);
-
-                    if enabled_changed {
-                        let mut app = self.app_mut();
-                        app.last_clicker_enabled = app.clicker_enabled;
-
-                        if app.clicker_enabled {
-                            app.clicker_start_time = Instant::now();
-                            drop(app);
-                            self.start_clicker();
-                        } else {
-                            app.try_release_mouse();
-                        }
-                    }
-                });
-            });
+            if self.app().compact_mode {
+                self.show_compact_menu(ui);
+            } else {
+                self.show_menu(ui);
+            }
         });
 
+        let app = self.app();
+        let enabled_changed = app.clicker_enabled != app.last_clicker_enabled;
+        drop(app);
+
+        if enabled_changed {
+            let mut app = self.app_mut();
+            app.last_clicker_enabled = app.clicker_enabled;
+
+            if app.clicker_enabled {
+                app.clicker_start_time = Instant::now();
+                drop(app);
+                self.start_clicker();
+            } else {
+                app.try_release_mouse();
+            }
+        }
+
         if self.app().clicker_enabled {
-            self.enabled_shield(ctx);
+            if self.app().compact_mode {
+                self.compact_click_shield(ctx);
+            } else {
+                self.click_shield(ctx);
+            }
         }
 
         ctx.request_repaint();
