@@ -48,7 +48,7 @@ enum IntervalMode {
     Random,
 }
 
-const COMPACT_WINDOW_SIZE: Vec2 = Vec2::new(200.0, 80.0);
+const COMPACT_WINDOW_SIZE: Vec2 = Vec2::new(240.0, 80.0);
 const WINDOW_SIZE: Vec2 = Vec2::new(400.0, 410.0);
 const TOGGLE_AUTO_CLICKER_SHORTCUT: KeyboardShortcut =
     egui::KeyboardShortcut::new(egui::Modifiers::NONE, egui::Key::F6);
@@ -136,6 +136,45 @@ fn big_header(ui: &mut egui::Ui, text: &str, image: Image) {
             });
         });
     ui.add_space(10.0);
+}
+
+fn show_constant_interval_mode(ui: &mut egui::Ui, h: &mut u32, m: &mut u32, s: &mut u32, ms: &mut u32) {
+	ui.columns(4, |columns| {
+		columns[0].add(egui::DragValue::new(h).range(0..=23).suffix("h"));
+		columns[1].add(egui::DragValue::new(m).range(0..=59).suffix("m"));
+		columns[2].add(egui::DragValue::new(s).range(0..=59).suffix("s"));
+		columns[3].add(egui::DragValue::new(ms).range(0..=999).suffix("ms"));
+	});
+}
+
+fn show_random_interval_mode(ui: &mut egui::Ui, min: &mut f32, max: &mut f32) {
+	ui.columns(2, |columns| {
+		// Clamp max between 0.0 and 3600.0
+		if *max > 3600.0 {
+			*max = 3600.0;
+		} else if *max < 0.0 {
+			*max = 0.0;
+		}
+
+		// Clamp min between 0.0 and max
+		if *min > *max {
+			*min = *max;
+		} else if *min < 0.0 {
+			*min = 0.0;
+		}
+
+		let fields = [min, max];
+		fields.into_iter().enumerate().for_each(|(i, value)| {
+			columns[i].add(egui::DragValue::new(value)
+				.suffix("s")
+				.speed(0.1)
+				.min_decimals(1)
+				.range(0..=3600)
+				.update_while_editing(false)
+				.max_decimals(3),
+			);
+		});
+	});
 }
 
 fn main() -> Result<(), eframe::Error> {
@@ -285,71 +324,35 @@ impl AppHolder {
                     ui,
                     Rect::from_center_size(ui.clip_rect().center(), [50.0, 50.0].into()),
                 );
+				egui::Grid::new("click_shield_grid").show(ui, |ui| {
+					let app = self.app();
 
-                let app = self.app();
-                if app.clicker_enabled {
-                    egui::Frame::popup(&ctx.style()).show(ui, |ui| {
-                        ui.push_id(ui.next_auto_id(), |ui| {
-                            const ROW_HEIGHT: f32 = 10.0;
-                            TableBuilder::new(ui)
-                                .column(Column::auto())
-                                .column(Column::remainder())
-                                .striped(true)
-                                .resizable(false)
-                                .body(|mut body| {
-                                    body.row(ROW_HEIGHT, |mut row| {
-                                        row.col(|ui| {
-                                            ui.push_id(ui.next_auto_id(), |ui| {
-                                                ui.label("Time");
-                                            });
-                                        });
-                                        row.col(|ui| {
-                                            ui.push_id(ui.next_auto_id(), |ui| {
-                                                ui.label(
-                                                    RichText::new(format!(
-                                                        "{:.2}",
-                                                        Instant::now()
-                                                            .duration_since(app.clicker_start_time)
-                                                            .as_secs_f64()
-                                                    ))
-                                                    .color(ui.style().visuals.strong_text_color()),
-                                                );
-                                            });
-                                        });
-                                    });
-                                    body.row(ROW_HEIGHT, |mut row| {
-                                        row.col(|ui| {
-                                            ui.push_id(ui.next_auto_id(), |ui| {
-                                                ui.label("Clicks");
-                                            });
-                                        });
-                                        row.col(|ui| {
-                                            ui.push_id(ui.next_auto_id(), |ui| {
-                                                ui.horizontal(|ui| {
-                                                    ui.label(
-                                                        RichText::new(format!(
-                                                            "{}",
-                                                            app.total_clicks
-                                                        ))
-                                                        .color(
-                                                            ui.style().visuals.strong_text_color(),
-                                                        ),
-                                                    );
-                                                    if app.focused {
-                                                        warning_tag(
-                                                            ui,
-                                                            "UNFOCUS THE WINDOW TO CLICK!",
-                                                        );
-                                                    }
-                                                });
-                                            });
-                                        });
-                                    });
-                                });
-                        });
-                    });
-                }
-            });
+					ui.label("Time");
+					ui.label(
+						RichText::new(format!(
+							"{:.2}",
+							Instant::now()
+								.duration_since(app.clicker_start_time)
+								.as_secs_f64()
+						))
+						.color(ui.style().visuals.strong_text_color()),
+					);
+					ui.end_row();
+
+					ui.label("Clicks");
+					ui.label(
+						RichText::new(format!("{}", app.total_clicks))
+							.color(ui.style().visuals.strong_text_color()),
+					);
+					ui.end_row();
+				});
+
+				if self.app().focused {
+					ui.with_layout(Layout::bottom_up(egui::Align::Center), |ui| {
+						warning_tag(ui, "UNFOCUS THE WINDOW TO CLICK!");
+					});
+				}
+			});
     }
 
     fn compact_click_shield(&mut self, ctx: &egui::Context) {
@@ -403,7 +406,7 @@ impl AppHolder {
             });
 
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("Actions", |ui| {
+				ui.menu_button("Actions", |ui| {
                     if ui
                         .add(
                             egui::Button::new(if self.app().clicker_enabled {
@@ -431,6 +434,22 @@ impl AppHolder {
                         }
                     }
                 });
+
+				if !self.app().compact_mode {
+					ui.separator();
+
+					if ui.selectable_label(true, "Home").clicked() {
+
+					}
+
+					if ui.selectable_label(false, "Settings").clicked() {
+
+					}
+
+					if ui.selectable_label(false, "Keybinds").clicked() {
+
+					}
+				}
 
                 ui.painter().text(
                     ui.available_rect_before_wrap().right_center(),
@@ -515,10 +534,7 @@ impl AppHolder {
 
     fn show_menu(&mut self, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical().show(ui, |ui| {
-			let app = self.app();
-			let enabled = !app.clicker_enabled;
-			drop(app);
-
+			let enabled = !self.app().clicker_enabled;
 			ui.add_enabled_ui(enabled, |ui| {
 				let mut app = self.app_mut();
 
@@ -534,36 +550,17 @@ impl AppHolder {
 						}
 
 						ui.add_enabled_ui(app.interval_mode == IntervalMode::Constant, |ui| {
-							ui.columns(4, |columns| {
-								let mut h = app.hours;
-								let mut m = app.minutes;
-								let mut s = app.seconds;
-								let mut ms = app.milliseconds;
+							let mut h = app.hours;
+							let mut m = app.minutes;
+							let mut s = app.seconds;
+							let mut ms = app.milliseconds;
 
-								let fields = [
-									("h", &mut h),
-									("m", &mut m),
-									("s", &mut s),
-									("ms", &mut ms),
-								];
-								fields.into_iter().enumerate().for_each(
-									|(i, (suffix, value))| {
-										columns[i].push_id(i, |ui| {
-											ui.add(
-												egui::DragValue::new(value)
-													.suffix(suffix)
-													.speed(1)
-													.max_decimals(0),
-											)
-										});
-									},
-								);
+							show_constant_interval_mode(ui, &mut h, &mut m, &mut s, &mut ms);
 
-								app.hours = h;
-								app.minutes = m;
-								app.seconds = s;
-								app.milliseconds = ms;
-							});
+							app.hours = h;
+							app.minutes = m;
+							app.seconds = s;
+							app.milliseconds = ms;
 						});
 
 						ui.add_space(15.0);
@@ -579,39 +576,19 @@ impl AppHolder {
 						}
 
 						ui.add_enabled_ui(app.interval_mode == IntervalMode::Random, |ui| {
-							ui.columns(2, |columns| {
-								let mut min = app.interval_mode_random_min;
-								let mut max = app.interval_mode_random_max;
+							let mut min = app.interval_mode_random_min;
+							let mut max = app.interval_mode_random_max;
 
-								max = max.clamp(0.0, 3600.0);
-								min = min.clamp(0.0, max);
+							show_random_interval_mode(ui, &mut min, &mut max);
 
-								let fields = [&mut min, &mut max];
-								fields.into_iter().enumerate().for_each(|(i, value)| {
-									columns[i].push_id(i, |ui| {
-										ui.add(
-											egui::DragValue::new(value)
-												.suffix("s")
-												.speed(0.1)
-												.min_decimals(1)
-												.range(0..=3600)
-												.update_while_editing(false)
-												.max_decimals(3),
-										);
-									});
-								});
-
-								app.interval_mode_random_min = min;
-								app.interval_mode_random_max = max;
-							});
+							app.interval_mode_random_min = min;
+							app.interval_mode_random_max = max;
 						});
 						ui.add_enabled_ui(app.interval_mode == IntervalMode::Random, |ui| {
 							ui.columns(2, |columns| {
 								let fields = ["Min", "Max"];
 								fields.into_iter().enumerate().for_each(|(i, text)| {
-									columns[i].push_id(i, |ui| {
-										ui.label(text);
-									});
+									columns[i].add(egui::Label::new(text));
 								});
 							});
 						});
@@ -624,7 +601,7 @@ impl AppHolder {
 								+ app.seconds as f64
 								+ app.milliseconds as f64 / 1000.0
 						}
-						IntervalMode::Random => app.interval_mode_random_min as f64,
+						IntervalMode::Random => app.interval_mode_random_max as f64,
 					};
 					let cps: u32 = (1.0 / total_seconds) as u32;
 
@@ -794,14 +771,44 @@ impl AppHolder {
     }
 
     fn show_compact_menu(&mut self, ui: &mut egui::Ui) {
-        ui.with_layout(
-            Layout::centered_and_justified(egui::Direction::LeftToRight),
-            |ui| {
-                ui.label(
-                    RichText::new("Compact Mode").color(ui.style().visuals.strong_text_color()),
-                );
-            },
-        );
+		let enabled = !self.app().clicker_enabled;
+		ui.add_enabled_ui(enabled, |ui| {
+			ui.with_layout(
+				Layout::centered_and_justified(egui::Direction::LeftToRight),
+				|ui| {
+					let mut app = self.app_mut();
+
+					match app.interval_mode {
+						IntervalMode::Constant => {
+							let mut h = app.hours;
+							let mut m = app.minutes;
+							let mut s = app.seconds;
+							let mut ms = app.milliseconds;
+
+							show_constant_interval_mode(ui, &mut h, &mut m, &mut s, &mut ms);
+
+							app.hours = h;
+							app.minutes = m;
+							app.seconds = s;
+							app.milliseconds = ms;
+						}
+						IntervalMode::Random => {
+							let mut min = app.interval_mode_random_min;
+							let mut max = app.interval_mode_random_max;
+
+							show_random_interval_mode(ui, &mut min, &mut max);
+
+							app.interval_mode_random_min = min;
+							app.interval_mode_random_max = max;
+						}
+					}
+
+					// ui.label(
+					//     RichText::new("Compact Mode").color(ui.style().visuals.strong_text_color()),
+					// );
+				},
+			);
+		});
     }
 
     fn start_clicker(&self) {
