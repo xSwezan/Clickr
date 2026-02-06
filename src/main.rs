@@ -267,9 +267,7 @@ impl AppHolder {
         let app_arc_clone = app_arc.clone();
 
         KeybdKey::F6Key.bind(move || {
-            println!("F6");
             let mut app = app_arc_clone.lock().unwrap();
-            // app.clicker_enabled = !app.clicker_enabled;
 
             if !app.clicker_enabled {
                 app.clicker_enabled = true;
